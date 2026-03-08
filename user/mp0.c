@@ -4,11 +4,6 @@
 #include "kernel/fs.h"
 #include "kernel/fcntl.h"
 
-void print_err(const char *path) {
-    printf("%s [error opening dir]\n", path);
-    printf("\n0 directories, 0 files\n");
-}
-
 int count_char(const char *path, const char key) {
   int cnt = 0;
   for (int i = 0; i < strlen(path); i++)
@@ -17,20 +12,19 @@ int count_char(const char *path, const char key) {
   return cnt;
 }
 
-void ls(char* root, char key, int* dir_cnt, int* file_cnt) {
+void walk(char *root, char key, int *dir_cnt, int *file_cnt) {
   char buf[512], *p;
   int fd;
   struct dirent de;
   struct stat st;
-  char *path = root;
 
-  if ((fd = open(path, O_RDONLY)) < 0) {
-    fprintf(2, "ls: cannot open %s\n", path);
+  if ((fd = open(root, O_RDONLY)) < 0) {
+    fprintf(2, "walk: cannot open %s\n", root);
     return;
   }
 
   if (fstat(fd, &st) < 0) {
-    fprintf(2, "ls: cannot stat %s\n", path);
+    fprintf(2, "walk: cannot stat %s\n", root);
     close(fd);
     return;
   }
@@ -43,11 +37,11 @@ void ls(char* root, char key, int* dir_cnt, int* file_cnt) {
 
   case T_DIR:
     (*dir_cnt)++;
-    if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
-      printf("ls: path too long\n");
+    if(strlen(root) + 1 + DIRSIZ + 1 > sizeof buf){
+      printf("walk: path too long\n");
       break;
     }
-    strcpy(buf, path);
+    strcpy(buf, root);
     p = buf+strlen(buf);
     *p++ = '/';
     while(read(fd, &de, sizeof(de)) == sizeof(de)){
@@ -56,11 +50,11 @@ void ls(char* root, char key, int* dir_cnt, int* file_cnt) {
       memmove(p, de.name, DIRSIZ);
       p[DIRSIZ] = 0;
       if(stat(buf, &st) < 0){
-        printf("ls: cannot stat %s\n", buf);
+        printf("walk: cannot stat %s\n", buf);
         continue;
       }
       printf("%s %d\n", buf, count_char(buf, key));
-      ls(buf, key, dir_cnt, file_cnt);
+      walk(buf, key, dir_cnt, file_cnt);
     }
     break;
   }
@@ -68,50 +62,37 @@ void ls(char* root, char key, int* dir_cnt, int* file_cnt) {
 }
 
 void mp0(char *root, char key) {
-  // TODO: implement mp0
-  // Hint: Use pipe, fork, and walk
-  int fd;
   struct stat st;
-  char *path = root;
   int p[2];
-  if ((fd = open(path, O_RDONLY)) < 0) {
-    // fprintf(2, "ls: cannot open %s\n", path);
-    print_err(path);
-    return;
-  }
+  int dir_cnt = 0;
+  int file_cnt = 0;
 
-  if (fstat(fd, &st) < 0) {
-    // fprintf(2, "ls: cannot stat %s\n", path);
-    print_err(path);
-    close(fd);
+  if(stat(root, &st) < 0 || st.type != T_DIR){
+    printf("%s [error opening dir]\n", root);
+    printf("\n0 directories, 0 files\n");
     return;
   }
-
-  if (st.type != T_DIR) {
-    print_err(path);
-    return;
-  }
-  close(fd);
-  printf("%s %d\n", root, count_char(path, key));
+  
+  printf("%s %d\n", root, count_char(root, key));
+  
   pipe(p);
   if(fork() == 0){
+    int child_dirs = -1;
+    int child_files = 0;
     close(p[0]);
-    int dir_cnt = -1;
-    int file_cnt = 0;
-    ls(path, key, &dir_cnt, &file_cnt);
-    write(p[1], &dir_cnt, sizeof(int));
-    write(p[1], &file_cnt, sizeof(int));
+    walk(root, key, &child_dirs, &child_files);
+    write(p[1], &child_dirs, sizeof(int));
+    write(p[1], &child_files, sizeof(int));
     close(p[1]);
     exit(0);
   }
+
   close(p[1]);
-  int dir_cnt = 0;
-  int file_cnt = 0;
-  wait(0);
   read(p[0], &dir_cnt, sizeof(int));
   read(p[0], &file_cnt, sizeof(int));
+  wait(0);
   close(p[0]);
-  printf("\n%d directories, %d files\n", dir_cnt, file_cnt); // placeholder
+  printf("\n%d directories, %d files\n", dir_cnt, file_cnt);
 }
 
 int main(int argc, char *argv[]) {
